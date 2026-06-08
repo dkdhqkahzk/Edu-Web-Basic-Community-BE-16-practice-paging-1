@@ -60,6 +60,7 @@ exports.loginUser = async (requestData, response) => {
 };
 
 // 회원가입
+// [보완된 회원가입]
 exports.signUpUser = async requestData => {
     const { email, password, nickname, profileImagePath } = requestData;
 
@@ -81,7 +82,9 @@ exports.signUpUser = async requestData => {
     if (!userResults.insertId) return null;
 
     let profileImageId = null;
-    if (profileImagePath) {
+    
+    // 💡 보완: profileImagePath가 진짜 존재하고 공백이 아닐 때만 실행되도록 안전장치 추가
+    if (profileImagePath && profileImagePath.trim() !== '') {
         const insertFileSql = `
         INSERT INTO file_table (user_id, file_path, file_category)
         VALUES (?, ?, 1);
@@ -110,6 +113,54 @@ exports.signUpUser = async requestData => {
         userId: userResults.insertId,
         profileImageId: profileImageId,
     };
+};
+
+// [보완된 회원정보 수정]
+exports.updateUser = async requestData => {
+    const { userId, nickname, profileImagePath } = requestData;
+
+    const updateUserSql = `
+        UPDATE user_table
+        SET nickname = ?
+        WHERE user_id = ? AND deleted_at IS NULL;
+    `;
+    const updateUserResults = await dbConnect.query(updateUserSql, [
+        nickname,
+        userId,
+    ]);
+
+    if (!updateUserResults) return null;
+
+    // 💡 보완: 이미지가 넘어오지 않았거나(undefined, null) 빈 문자열("" 등)이라면 
+    // 파일 추가 로직을 건너뛰고 닉네임 수정 결과만 즉시 반환합니다.
+    if (!profileImagePath || profileImagePath.trim() === '') {
+        return updateUserResults;
+    }
+
+    const profileImageSql = `
+        INSERT INTO file_table
+        (user_id, file_path, file_category)
+        VALUES (?, ?, 1);
+    `;
+    const profileImageResults = await dbConnect.query(profileImageSql, [
+        userId,
+        profileImagePath,
+    ]);
+
+    if (!profileImageResults.insertId)
+        return STATUS_MESSAGE.UPDATE_PROFILE_IMAGE_FAILED;
+
+    const userProfileSql = `
+        UPDATE user_table
+        SET file_id = ?
+        WHERE user_id = ? AND deleted_at IS NULL;
+    `;
+    const userProfileResults = await dbConnect.query(userProfileSql, [
+        profileImageResults.insertId,
+        userId,
+    ]);
+
+    return userProfileResults;
 };
 
 // 유저 정보 불러오기
